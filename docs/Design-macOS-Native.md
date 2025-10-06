@@ -1,17 +1,17 @@
-# Photo Watermark 原生 macOS 设计说明（零依赖分发）
+# Photo Watermark 原生 macOS 设计说明（SwiftUI + AppKit，Zip分发，右键放行）
 
 ## 1. 目标与原则
-- 目标：用户从官网下载 `.dmg`，拖入 `Applications` 后即可双击运行；无需额外安装任何运行时或库。
+- 目标：用户从仓库下载 `zip`，解压得到 `.app`，在 Finder 右键→打开 后即可运行；无需额外安装任何运行时或库。
 - 原则：
   - 完全依赖 macOS 系统框架（`ImageIO`、`CoreGraphics`、`UniformTypeIdentifiers`、`AppKit/SwiftUI`）。
-  - 生成通用二进制（`arm64 + x86_64`），代码签名并通过 Apple Notarization。
+  - 生成通用二进制（`arm64 + x86_64`），不强制要求证书与公证；后续如需“直接双击运行”再补充签名与公证。
   - 预览与导出一致的绘制逻辑；不覆盖原图，保存到 `原目录名_watermark` 子目录。
 
 ## 2. 技术栈
 - 语言与框架：Swift 5.9+，SwiftUI（主界面）+ AppKit（文件对话框、颜色面板桥接）。
 - 图像与 EXIF：`ImageIO`（`CGImageSourceCopyProperties`），`CoreGraphics`/`CoreImage`（渲染、合成）。
 - 文件类型与路径：`UniformTypeIdentifiers (UTType)`，`FileManager`。
-- 打包与分发：Xcode 构建通用 `.app`，封装 `.dmg`，`codesign` + `notarytool` 公证。
+- 打包与分发：Xcode 构建通用 `.app`；使用 `ditto` 压缩为 `zip` 分发；无证书/未公证情况下通过右键打开或 `xattr` 放行。
 
 ## 3. 架构概览
 - 分层：
@@ -65,10 +65,14 @@
 
 ## 9. 零依赖分发与合规
 - 构建：Xcode 生成通用 `.app`（`arm64`+`x86_64`）。
-- 签名：`codesign --deep --force --options runtime --sign "Developer ID Application: <Your Name>" <App.app>`。
-- 公证：`notarytool submit <App.dmg> --keychain-profile <profile> --wait`；通过后可分发，用户无安全阻拦。
-- DMG 打包：使用 `create-dmg` 或自建脚本，将 `.app` 放入 `.dmg`。
-- Gatekeeper 体验：已签名+公证的应用可直接双击运行；首次打开出现来源提示为正常（可优化指引）。
+- Zip 打包：`ditto -c -k --keepParent "PhotoWatermark.app" "PhotoWatermark.zip"` 保留资源与扩展属性。
+- 无证书/未公证：
+  - Finder 右键 `PhotoWatermark.app` → 打开 → 弹窗选择“打开”，一次性放行。
+  - 或在终端执行：`xattr -dr com.apple.quarantine "/路径/PhotoWatermark.app"` 后直接双击运行。
+- 可选签名与公证（若未来希望直接双击运行）：
+  - `codesign --deep --force --options runtime --sign "Developer ID Application: Your Name (TEAMID)" "PhotoWatermark.app"`
+  - `xcrun notarytool submit "PhotoWatermark.app" --keychain-profile <profile> --wait`
+  - `xcrun stapler staple "PhotoWatermark.app"`
 
 ## 10. 性能与稳定性
 - 预览保持比例缩放；使用原始像素进行导出绘制，避免质量损失。
@@ -78,8 +82,8 @@
 ## 11. 开发里程碑
 - v0.1：项目骨架（SwiftUI 窗口 + 文件打开 + 原图预览）。
 - v0.2：EXIF 读取、`YYYY-MM-DD` 文本生成、预览水印叠加。
-- v0.3：导出绘制与保存到子目录；基础错误处理。
-- v0.4：通用构建、签名、公证、打包为 `.dmg`。
+- v0.3：导出绘制与保存到子目录；基础错误处理；zip 打包与 README 放行指南。
+- v0.4（可选）：通用构建、签名、公证，使用户可直接双击运行。
 - v1.0：体验打磨、更多位置/边距设置、可选阴影/描边。
 
 ## 12. 目录结构（建议）
