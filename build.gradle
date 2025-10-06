@@ -1,0 +1,44 @@
+plugins {
+    id 'java'
+    id 'application'
+}
+
+group = 'com.photo.watermark'
+version = '0.1.0'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+def javafxVersion = '20.0.2'
+def metadataExtractorVersion = '2.18.0'
+def twelveMonkeysVersion = '3.10.1'
+
+dependencies {
+    implementation "org.openjfx:javafx-controls:${javafxVersion}"
+    implementation "org.openjfx:javafx-graphics:${javafxVersion}"
+    implementation "com.drewnoakes:metadata-extractor:${metadataExtractorVersion}"
+    implementation "com.twelvemonkeys.imageio:imageio-jpeg:${twelveMonkeysVersion}"
+    implementation "com.twelvemonkeys.imageio:imageio-png:${twelveMonkeysVersion}"
+}
+
+application {
+    mainClass = 'com.photo.watermark.MainApp'
+}
+
+tasks.withType(JavaExec).configureEach {
+    // Mac 上运行 JavaFX 需要设置模块路径与添加模块
+    def osName = System.getProperty('os.name').toLowerCase()
+    if (osName.contains('mac')) {
+        jvmArgs += [
+                "--module-path", configurations.runtimeClasspath.asPath,
+                "--add-modules", "javafx.controls,javafx.graphics"
+        ]
+    }
+}
