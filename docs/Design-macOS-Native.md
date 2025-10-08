@@ -35,11 +35,10 @@
 - 布局：`NavigationSplitView` 或 `HStack`（左侧预览，右侧设置面板）。
 - 顶部工具栏：`打开`、`保存`、`帮助`。
 - 右侧设置：
+  - 水印类型分段控制：`文字 | 图片`（互斥，默认文字）。
   - 拍摄日期文本（只读，EXIF 解析；无则提供“选择日期”按钮）。
-  - 字体大小（默认 24，范围 12–96）。
-  - 颜色选择器（默认白色）。
-  - 位置选择（左上、居中、右下）。
-  - 边距（默认 16 px）。
+  - 文字：字体大小（默认 24，范围 12–96）、颜色与透明度、字体族、位置、边距；阴影（偏移 X/Y、半径、颜色与透明度）与描边（宽度/颜色）。
+  - 图片：选择图片、不透明度；缩放（百分比 0.01%–100% 或指定宽/高）；位置与边距。
 - 状态栏：显示解析状态、输出目录、保存结果。
 
 ## 6. 水印绘制与坐标算法
@@ -50,7 +49,7 @@
   - `TOP_LEFT`：`(margin, margin + ascent)`。
   - `CENTER`：`((W - textW)/2, (H - textH)/2 + ascent)`。
   - `BOTTOM_RIGHT`：`(W - textW - margin, H - textH - margin + ascent)`。
-- 渲染：开启文本抗锯齿与插值；必要时可加轻微阴影/描边提升可读性（后续可选）。
+- 渲染：开启文本抗锯齿与插值；文字类型支持阴影/描边，图片类型不显示相关控制。
 
 ## 7. EXIF 解析策略
 - 从 `CGImageSource` 属性中读取 `kCGImagePropertyExifDictionary`：
@@ -63,16 +62,13 @@
 - 输出格式：与输入一致；JPEG 可设质量（默认 0.9）。
 - 元数据：尽量保留 EXIF；若系统 API 限制导致部分丢失，提供提示文案与开关。
 
-## 9. 零依赖分发与合规
-- 构建：Xcode 生成通用 `.app`（`arm64`+`x86_64`）。
-- Zip 打包：`ditto -c -k --keepParent "PhotoWatermark.app" "PhotoWatermark.zip"` 保留资源与扩展属性。
+## 9. 分发与合规（SwiftPM / 可选 App 包）
+- 构建（SwiftPM）：`swift build -c release`，生成可执行二进制 `PhotoWatermark`。
+- 二进制 Zip 打包（CI）：压缩为 `dist/PhotoWatermark-<tag>-macos.zip`；也支持在仓库根目录附加版本号匹配的 zip `PhotoWatermark-<tag>-macos.zip` 并随 Release 上传。
 - 无证书/未公证：
-  - Finder 右键 `PhotoWatermark.app` → 打开 → 弹窗选择“打开”，一次性放行。
-  - 或在终端执行：`xattr -dr com.apple.quarantine "/路径/PhotoWatermark.app"` 后直接双击运行。
-- 可选签名与公证（若未来希望直接双击运行）：
-  - `codesign --deep --force --options runtime --sign "Developer ID Application: Your Name (TEAMID)" "PhotoWatermark.app"`
-  - `xcrun notarytool submit "PhotoWatermark.app" --keychain-profile <profile> --wait`
-  - `xcrun stapler staple "PhotoWatermark.app"`
+  - Finder 右键 `PhotoWatermark` → 打开 → 弹窗选择“打开”，一次性放行。
+  - 或在终端执行：`xattr -dr com.apple.quarantine "/路径/PhotoWatermark"` 后运行。
+- 可选（未来）：Xcode 生成通用 `.app`（`arm64`+`x86_64`），签名与公证以支持直接双击运行。
 
 ## 10. 性能与稳定性
 - 预览保持比例缩放；使用原始像素进行导出绘制，避免质量损失。

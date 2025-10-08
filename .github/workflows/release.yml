@@ -9,8 +9,10 @@ jobs:
   build-and-release:
     runs-on: macos-latest
     steps:
-      - name: Checkout
+      - name: Checkout (with LFS)
         uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - name: Set up Xcode/Swift
         run: |
@@ -38,6 +40,7 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           name: "PhotoWatermark ${{ github.ref_name }}"
+          fail_on_unmatched_files: false
           body: |
             版本说明（${{ github.ref_name }}）
 
@@ -58,5 +61,8 @@ jobs:
 
             构建与验证：
             - 已通过调试与发布模式的构建验证。
+          files: |
+            PhotoWatermark-${{ github.ref_name }}-macos.zip
+            dist/PhotoWatermark-${{ github.ref_name }}-macos.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
