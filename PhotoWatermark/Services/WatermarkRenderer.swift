@@ -45,7 +45,17 @@ enum WatermarkRenderer {
             let wmPos = WatermarkLayout.computePosition(imageSize: targetSize, watermarkSize: wmSize, spec: spec)
             let wmRect = CGRect(origin: wmPos, size: wmSize)
             // 使用 fraction 控制整体透明度
-            wmImage.draw(in: wmRect, from: .zero, operation: .sourceOver, fraction: max(min(spec.imageOpacity, 1), 0))
+            if let cg = NSGraphicsContext.current?.cgContext {
+                cg.saveGState()
+                let center = CGPoint(x: wmRect.midX, y: wmRect.midY)
+                cg.translateBy(x: center.x, y: center.y)
+                cg.rotate(by: spec.rotationDegrees * .pi / 180.0)
+                let drawRect = CGRect(x: -wmRect.size.width / 2, y: -wmRect.size.height / 2, width: wmRect.size.width, height: wmRect.size.height)
+                wmImage.draw(in: drawRect, from: .zero, operation: .sourceOver, fraction: max(min(spec.imageOpacity, 1), 0))
+                cg.restoreGState()
+            } else {
+                wmImage.draw(in: wmRect, from: .zero, operation: .sourceOver, fraction: max(min(spec.imageOpacity, 1), 0))
+            }
         }
 
         // 配置文本属性（字体族、粗体、斜体）
@@ -104,8 +114,17 @@ enum WatermarkRenderer {
         let textSize = nsString.size(withAttributes: attrs)
         let position = WatermarkLayout.computePosition(imageSize: targetSize, watermarkSize: textSize, spec: spec)
 
-        // 绘制文本
-        nsString.draw(at: position, withAttributes: attrs)
+        // 绘制文本（支持围绕中心旋转）
+        if let cg = NSGraphicsContext.current?.cgContext {
+            cg.saveGState()
+            let center = CGPoint(x: position.x + textSize.width / 2, y: position.y + textSize.height / 2)
+            cg.translateBy(x: center.x, y: center.y)
+            cg.rotate(by: spec.rotationDegrees * .pi / 180.0)
+            nsString.draw(at: CGPoint(x: -textSize.width / 2, y: -textSize.height / 2), withAttributes: attrs)
+            cg.restoreGState()
+        } else {
+            nsString.draw(at: position, withAttributes: attrs)
+        }
 
         NSGraphicsContext.restoreGraphicsState()
         if let rep {

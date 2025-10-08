@@ -25,6 +25,11 @@ struct ContentView: View {
     @State private var strokeWidth: Double = 2
     @State private var strokeColor: NSColor = .black
     @State private var position: WatermarkPosition = .bottomRight
+    // 手动拖拽定位与旋转
+    @State private var useManualPosition: Bool = false
+    @State private var manualX: Double = 0
+    @State private var manualY: Double = 0
+    @State private var rotationDegrees: Double = 0
     @State private var isDropTargetActive: Bool = false
     @State private var importedItems: [ImportedItem] = []
     @State private var selectedIndex: Int? = nil
@@ -66,6 +71,40 @@ struct ContentView: View {
                                 .scaledToFit()
                                 .frame(minWidth: 500, minHeight: 380)
                                 .border(Color.gray.opacity(0.2))
+                                .overlay(
+                                    GeometryReader { geo in
+                                        // 捕获拖拽手势，将视图坐标转换为图像坐标（左下为原点）
+                                        Rectangle()
+                                            .fill(Color.clear)
+                                            .contentShape(Rectangle())
+                                            .gesture(
+                                                DragGesture(minimumDistance: 0)
+                                                    .onChanged { value in
+                                                        let containerSize = geo.size
+                                                        let img = image
+                                                        let imgSize = img.size
+                                                        let scale = min(containerSize.width / imgSize.width, containerSize.height / imgSize.height)
+                                                        let drawW = imgSize.width * scale
+                                                        let drawH = imgSize.height * scale
+                                                        let drawX = (containerSize.width - drawW) / 2
+                                                        let drawY = (containerSize.height - drawH) / 2
+                                                        let vx = value.location.x
+                                                        let vy = value.location.y
+                                                        // 限制到绘制区域内
+                                                        let clampedX = min(max(vx, drawX), drawX + drawW)
+                                                        let clampedY = min(max(vy, drawY), drawY + drawH)
+                                                        let ixTopLeft = (clampedX - drawX) / scale
+                                                        let iyTopLeft = (clampedY - drawY) / scale
+                                                        let ix = ixTopLeft
+                                                        let iyBottomOrigin = imgSize.height - iyTopLeft
+                                                        self.manualX = ix
+                                                        self.manualY = iyBottomOrigin
+                                                        self.useManualPosition = true
+                                                        self.updatePreviewIfPossible()
+                                                    }
+                                            )
+                                    }
+                                )
                         } else {
                             VStack(spacing: 8) {
                                 Text("拖拽图片到此或点击‘打开图片’")
@@ -129,14 +168,6 @@ struct ContentView: View {
                     Button("打开图片", action: openImage)
                     Button("取消图片", action: cancelImage)
                         .disabled((sourceImage == nil) && (previewImage == nil))
-                    Button("预览水印", action: previewWatermark)
-                        .disabled(
-                            sourceImage == nil ||
-                            !(
-                                (watermarkType == .text && !watermarkText.isEmpty) ||
-                                (watermarkType == .image && imageWatermark != nil)
-                            )
-                        )
                     Button("保存图片", action: saveImage)
                         .disabled(previewImage == nil)
                 }
@@ -151,6 +182,7 @@ struct ContentView: View {
                 TextField("水印文本", text: $watermarkText)
                     .textFieldStyle(.roundedBorder)
                     .disabled(watermarkType == .image)
+                    .onChange(of: watermarkText) { _ in updatePreviewIfPossible() }
 
                 HStack {
                     Text("字号")
@@ -160,6 +192,7 @@ struct ContentView: View {
                         .frame(width: 40, alignment: .leading)
                 }
                 .disabled(watermarkType == .image)
+                .onChange(of: fontSize) { _ in updatePreviewIfPossible() }
 
                 HStack(spacing: 12) {
                     Picker("字体", selection: $fontFamily) {
@@ -173,6 +206,9 @@ struct ContentView: View {
                     Toggle("斜体", isOn: $isItalic)
                 }
                 .disabled(watermarkType == .image)
+                .onChange(of: fontFamily) { _ in updatePreviewIfPossible() }
+                .onChange(of: isBold) { _ in updatePreviewIfPossible() }
+                .onChange(of: isItalic) { _ in updatePreviewIfPossible() }
 
                 HStack(spacing: 12) {
                     Text("颜色")
@@ -188,6 +224,8 @@ struct ContentView: View {
                         .frame(width: 50, alignment: .leading)
                 }
                 .disabled(watermarkType == .image)
+                .onChange(of: fontColor) { _ in updatePreviewIfPossible() }
+                .onChange(of: opacity) { _ in updatePreviewIfPossible() }
 
                 VStack(alignment: .leading, spacing: 8) {
                     // 图片水印
@@ -207,6 +245,7 @@ struct ContentView: View {
                             Text("自由大小").tag(ImageScaleModeUI.free)
                         }
                         .pickerStyle(.segmented)
+                        .onChange(of: imageScaleModeUI) { _ in updatePreviewIfPossible() }
 
                         if imageScaleModeUI == .percent {
                             HStack {
@@ -216,6 +255,7 @@ struct ContentView: View {
                                     .monospacedDigit()
                                     .frame(width: 60, alignment: .leading)
                             }
+                            .onChange(of: imageScalePercent) { _ in updatePreviewIfPossible() }
                         } else {
                             HStack(spacing: 12) {
                                 Text("宽度(px)")
@@ -225,6 +265,8 @@ struct ContentView: View {
                                 TextField("", value: $imageTargetHeight, format: .number)
                                     .frame(width: 80)
                             }
+                            .onChange(of: imageTargetWidth) { _ in updatePreviewIfPossible() }
+                            .onChange(of: imageTargetHeight) { _ in updatePreviewIfPossible() }
                         }
 
                         HStack(spacing: 12) {
@@ -234,11 +276,13 @@ struct ContentView: View {
                                 .monospacedDigit()
                                 .frame(width: 60, alignment: .leading)
                         }
+                        .onChange(of: imageOpacity) { _ in updatePreviewIfPossible() }
                     }
                 if watermarkType == .text {
                     HStack(spacing: 12) {
                         Toggle("阴影", isOn: $enableShadow)
                     }
+                    .onChange(of: enableShadow) { _ in updatePreviewIfPossible() }
                     if enableShadow {
                         VStack(alignment: .leading, spacing: 8) {
                             // 第一行：两个偏移参数
@@ -250,6 +294,8 @@ struct ContentView: View {
                                 Slider(value: $shadowOffsetY, in: -20...20)
                                     .frame(width: 120)
                             }
+                            .onChange(of: shadowOffsetX) { _ in updatePreviewIfPossible() }
+                            .onChange(of: shadowOffsetY) { _ in updatePreviewIfPossible() }
                             // 第二行：剩余三个参数
                             HStack(spacing: 12) {
                                 Text("半径")
@@ -266,6 +312,9 @@ struct ContentView: View {
                                     .monospacedDigit()
                                     .frame(width: 50, alignment: .leading)
                             }
+                            .onChange(of: shadowBlurRadius) { _ in updatePreviewIfPossible() }
+                            .onChange(of: shadowColor) { _ in updatePreviewIfPossible() }
+                            .onChange(of: shadowOpacity) { _ in updatePreviewIfPossible() }
                         }
                     }
                         HStack(spacing: 12) {
@@ -284,15 +333,37 @@ struct ContentView: View {
                                 .labelsHidden()
                             }
                         }
+                        .onChange(of: enableStroke) { _ in updatePreviewIfPossible() }
+                        .onChange(of: strokeWidth) { _ in updatePreviewIfPossible() }
+                        .onChange(of: strokeColor) { _ in updatePreviewIfPossible() }
                 }
                 }
 
-                Picker("位置", selection: $position) {
-                    Text("左上").tag(WatermarkPosition.topLeft)
-                    Text("居中").tag(WatermarkPosition.center)
-                    Text("右下").tag(WatermarkPosition.bottomRight)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("位置")
+                    let cols = [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())]
+                    LazyVGrid(columns: cols, spacing: 6) {
+                        Button("左上") { position = .topLeft; useManualPosition = false; updatePreviewIfPossible() }
+                        Button("上中") { position = .topCenter; useManualPosition = false; updatePreviewIfPossible() }
+                        Button("右上") { position = .topRight; useManualPosition = false; updatePreviewIfPossible() }
+                        Button("左中") { position = .centerLeft; useManualPosition = false; updatePreviewIfPossible() }
+                        Button("居中") { position = .center; useManualPosition = false; updatePreviewIfPossible() }
+                        Button("右中") { position = .centerRight; useManualPosition = false; updatePreviewIfPossible() }
+                        Button("左下") { position = .bottomLeft; useManualPosition = false; updatePreviewIfPossible() }
+                        Button("下中") { position = .bottomCenter; useManualPosition = false; updatePreviewIfPossible() }
+                        Button("右下") { position = .bottomRight; useManualPosition = false; updatePreviewIfPossible() }
+                    }
+                    HStack(spacing: 12) {
+                        Button("重置为预设") { useManualPosition = false; updatePreviewIfPossible() }
+                        HStack {
+                            Text("旋转角度")
+                            Slider(value: $rotationDegrees, in: 0...360)
+                            TextField("", value: $rotationDegrees, format: .number)
+                                .frame(width: 60)
+                        }
+                        .onChange(of: rotationDegrees) { _ in updatePreviewIfPossible() }
+                    }
                 }
-                .pickerStyle(.segmented)
 
                 Picker("输出格式", selection: $outputFormat) {
                     Text("PNG").tag(OutputFormat.png)
@@ -385,7 +456,7 @@ struct ContentView: View {
 
                 Spacer()
 
-                Text("提示：先‘打开图片’，输入水印后‘预览水印’，确认后‘保存图片’。")
+                Text("提示：打开图片后，所有水印调整都会实时显示在左侧预览；确认后点击‘保存图片’。")
                     .foregroundStyle(.secondary)
             }
             .frame(minWidth: 380)
@@ -397,6 +468,7 @@ struct ContentView: View {
         .onAppear {
             print("[ContentView] appeared: sourceImage=\(sourceImage != nil), previewImage=\(previewImage != nil)")
         }
+        .onChange(of: watermarkType) { _ in updatePreviewIfPossible() }
     }
 
     struct ImportedItem: Identifiable {
@@ -478,6 +550,10 @@ struct ContentView: View {
             fontSize: CGFloat(fontSize),
             margin: 24,
             position: position,
+            useManualPosition: useManualPosition,
+            manualX: CGFloat(manualX),
+            manualY: CGFloat(manualY),
+            rotationDegrees: CGFloat(rotationDegrees),
             fontFamily: (watermarkType == .text ? (fontFamily.isEmpty ? nil : fontFamily) : nil),
             isBold: (watermarkType == .text ? isBold : false),
             isItalic: (watermarkType == .text ? isItalic : false),
@@ -503,6 +579,19 @@ struct ContentView: View {
         self.previewImage = result
     }
 
+    private func updatePreviewIfPossible() {
+        // 当有源图且满足水印条件时实时更新预览
+        guard sourceImage != nil else { return }
+        let canRenderText = (watermarkType == .text) && !watermarkText.isEmpty
+        let canRenderImage = (watermarkType == .image) && (imageWatermark != nil)
+        if canRenderText || canRenderImage {
+            previewWatermark()
+        } else {
+            // 若当前不满足渲染条件，回退显示原图（清空预览）
+            self.previewImage = nil
+        }
+    }
+
     private func chooseWatermarkImage() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [UTType.png, UTType.jpeg, UTType.tiff]
@@ -512,6 +601,7 @@ struct ContentView: View {
         if panel.runModal() == .OK, let url = panel.url {
             if let img = NSImage(contentsOf: url) {
                 self.imageWatermark = img
+                self.updatePreviewIfPossible()
             }
         }
     }
@@ -586,6 +676,10 @@ struct ContentView: View {
             fontSize: CGFloat(fontSize),
             margin: 24,
             position: position,
+            useManualPosition: useManualPosition,
+            manualX: CGFloat(manualX),
+            manualY: CGFloat(manualY),
+            rotationDegrees: CGFloat(rotationDegrees),
             fontFamily: (watermarkType == .text ? (fontFamily.isEmpty ? nil : fontFamily) : nil),
             isBold: (watermarkType == .text ? isBold : false),
             isItalic: (watermarkType == .text ? isItalic : false),
@@ -731,5 +825,6 @@ struct ContentView: View {
             let exif = ExifReader.read(from: url)
             if let date = exif.dateText, !date.isEmpty { self.watermarkText = date }
         }
+        self.updatePreviewIfPossible()
     }
 }
