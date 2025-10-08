@@ -1,0 +1,62 @@
+name: Create Release on Tag
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-release:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Xcode/Swift
+        run: |
+          swift --version
+
+      - name: Build (Release)
+        run: |
+          swift build -c release
+
+      - name: Package artifact
+        run: |
+          mkdir -p dist
+          if [ -f ".build/release/PhotoWatermark" ]; then
+            cp .build/release/PhotoWatermark dist/
+            cd dist
+            zip -r PhotoWatermark-${{ github.ref_name }}-macos.zip PhotoWatermark
+          else
+            # fallback: zip repository snapshot (heavy but reliable)
+            cd ..
+            zip -r dist/PhotoWatermark-${{ github.ref_name }}-macos.zip . -x "*.git*" -x "*.DS_Store"
+          fi
+
+      - name: Create GitHub Release and upload artifact
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "PhotoWatermark ${{ github.ref_name }}"
+          body: |
+            版本说明（${{ github.ref_name }}）
+
+            功能更新：
+            - 引入水印类型分段选择（文字/图片互斥），避免同时启用造成混乱。
+            - 将水印类型选择移动至操作区第二行，交互更清晰。
+            - 图片水印缩放范围调整为 0–100%，最低 0.01%。
+            - 阴影与描边仅在“文字水印”类型下显示，并将阴影参数拆分为两行（偏移X/Y；半径/颜色/透明度）。
+
+            渲染与保存：
+            - 根据水印类型互斥构造 WatermarkSpec，确保文字与图片属性不会同时生效。
+            - 去除 enableImageWatermark 分支，统一以 watermarkType 控制。
+            - 完善百分比缩放计算与边界处理（最小 0.01%）。
+
+            Bug 修复：
+            - 修复“水印类型”选择器曾被放在 ContentView 结构外导致构建失败的问题。
+            - 修正预览按钮可用状态，避免图片水印未选择图片时误可用。
+
+            构建与验证：
+            - 已通过调试与发布模式的构建验证。
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
