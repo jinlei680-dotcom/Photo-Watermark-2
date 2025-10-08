@@ -6,6 +6,11 @@ enum WatermarkPosition {
     case bottomRight
 }
 
+enum OutputFormat {
+    case png
+    case jpeg
+}
+
 struct WatermarkSpec {
     let text: String
     let fontSize: CGFloat

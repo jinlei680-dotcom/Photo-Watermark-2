@@ -5,7 +5,25 @@ enum WatermarkRenderer {
     static func render(image: NSImage, spec: WatermarkSpec) -> NSImage {
         let targetSize = image.size
         let newImage = NSImage(size: targetSize)
-        newImage.lockFocus()
+        // 使用带透明通道的位图上下文
+        let rect = CGRect(origin: .zero, size: targetSize)
+        let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(targetSize.width),
+            pixelsHigh: Int(targetSize.height),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        )
+        if let rep {
+            let ctx = NSGraphicsContext(bitmapImageRep: rep)
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = ctx
+        }
 
         // 绘制原图
         image.draw(in: CGRect(origin: .zero, size: targetSize))
@@ -26,7 +44,11 @@ enum WatermarkRenderer {
         // 绘制文本
         nsString.draw(at: position, withAttributes: attrs)
 
-        newImage.unlockFocus()
+        NSGraphicsContext.restoreGraphicsState()
+        if let rep {
+            newImage.addRepresentation(rep)
+        }
+        
         return newImage
     }
 
