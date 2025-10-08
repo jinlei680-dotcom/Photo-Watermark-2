@@ -8,6 +8,22 @@ struct ContentView: View {
     @State private var previewImage: NSImage?
     @State private var watermarkText: String = "© Watermark"
     @State private var fontSize: Double = 36
+    @State private var fontFamily: String = ""
+    @State private var availableFontFamilies: [String] = NSFontManager.shared.availableFontFamilies
+    @State private var isBold: Bool = false
+    @State private var isItalic: Bool = false
+    @State private var fontColor: NSColor = .white
+    @State private var opacity: Double = 85
+    @State private var enableShadow: Bool = false
+    // 阴影参数
+    @State private var shadowBlurRadius: Double = 3
+    @State private var shadowOffsetX: Double = 2
+    @State private var shadowOffsetY: Double = -2
+    @State private var shadowColor: NSColor = .black
+    @State private var shadowOpacity: Double = 50 // 0-100%
+    @State private var enableStroke: Bool = false
+    @State private var strokeWidth: Double = 2
+    @State private var strokeColor: NSColor = .black
     @State private var position: WatermarkPosition = .bottomRight
     @State private var isDropTargetActive: Bool = false
     @State private var importedItems: [ImportedItem] = []
@@ -25,6 +41,18 @@ struct ContentView: View {
     enum ResizeMode: Hashable { case none, width, height, percent }
     @State private var resizeMode: ResizeMode = .none
     @State private var resizeValue: Double = 100
+
+    // 图片水印相关
+    @State private var enableImageWatermark: Bool = false
+    @State private var imageWatermark: NSImage? = nil
+    enum ImageScaleModeUI: Hashable { case percent, free }
+    @State private var imageScaleModeUI: ImageScaleModeUI = .percent
+    @State private var imageScalePercent: Double = 50
+    @State private var imageTargetWidth: Double = 128
+    @State private var imageTargetHeight: Double = 64
+    @State private var imageOpacity: Double = 80
+    enum WatermarkTypeUI: Hashable { case text, image }
+    @State private var watermarkType: WatermarkTypeUI = .text
 
     var body: some View {
         HStack(spacing: 16) {
@@ -102,13 +130,27 @@ struct ContentView: View {
                     Button("取消图片", action: cancelImage)
                         .disabled((sourceImage == nil) && (previewImage == nil))
                     Button("预览水印", action: previewWatermark)
-                        .disabled(sourceImage == nil || watermarkText.isEmpty)
+                        .disabled(
+                            sourceImage == nil ||
+                            !(
+                                (watermarkType == .text && !watermarkText.isEmpty) ||
+                                (watermarkType == .image && imageWatermark != nil)
+                            )
+                        )
                     Button("保存图片", action: saveImage)
                         .disabled(previewImage == nil)
                 }
 
+                // 第二行：水印类型选择
+                Picker("水印类型", selection: $watermarkType) {
+                    Text("文字").tag(WatermarkTypeUI.text)
+                    Text("图片").tag(WatermarkTypeUI.image)
+                }
+                .pickerStyle(.segmented)
+
                 TextField("水印文本", text: $watermarkText)
                     .textFieldStyle(.roundedBorder)
+                    .disabled(watermarkType == .image)
 
                 HStack {
                     Text("字号")
@@ -116,6 +158,133 @@ struct ContentView: View {
                     Text("\(Int(fontSize))")
                         .monospacedDigit()
                         .frame(width: 40, alignment: .leading)
+                }
+                .disabled(watermarkType == .image)
+
+                HStack(spacing: 12) {
+                    Picker("字体", selection: $fontFamily) {
+                        Text("系统默认").tag("")
+                        ForEach(availableFontFamilies, id: \.self) { name in
+                            Text(name).tag(name)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    Toggle("粗体", isOn: $isBold)
+                    Toggle("斜体", isOn: $isItalic)
+                }
+                .disabled(watermarkType == .image)
+
+                HStack(spacing: 12) {
+                    Text("颜色")
+                    ColorPicker("", selection: Binding(
+                        get: { Color(fontColor) },
+                        set: { newColor in fontColor = NSColor(newColor) }
+                    ))
+                    .labelsHidden()
+                    Text("透明度")
+                    Slider(value: $opacity, in: 0...100)
+                    Text("\(Int(opacity))%")
+                        .monospacedDigit()
+                        .frame(width: 50, alignment: .leading)
+                }
+                .disabled(watermarkType == .image)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    // 图片水印
+                    if watermarkType == .image {
+                        HStack(spacing: 12) {
+                            Button("选择图片", action: chooseWatermarkImage)
+                            if imageWatermark != nil {
+                                Text("已选择：\(Int(imageWatermark!.size.width))x\(Int(imageWatermark!.size.height))")
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                Text("未选择")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Picker("缩放模式", selection: $imageScaleModeUI) {
+                            Text("按比例").tag(ImageScaleModeUI.percent)
+                            Text("自由大小").tag(ImageScaleModeUI.free)
+                        }
+                        .pickerStyle(.segmented)
+
+                        if imageScaleModeUI == .percent {
+                            HStack {
+                                Text("缩放百分比")
+                                Slider(value: $imageScalePercent, in: 0...100)
+                                Text("\(Int(imageScalePercent))%")
+                                    .monospacedDigit()
+                                    .frame(width: 60, alignment: .leading)
+                            }
+                        } else {
+                            HStack(spacing: 12) {
+                                Text("宽度(px)")
+                                TextField("", value: $imageTargetWidth, format: .number)
+                                    .frame(width: 80)
+                                Text("高度(px)")
+                                TextField("", value: $imageTargetHeight, format: .number)
+                                    .frame(width: 80)
+                            }
+                        }
+
+                        HStack(spacing: 12) {
+                            Text("图片透明度")
+                            Slider(value: $imageOpacity, in: 0...100)
+                            Text("\(Int(imageOpacity))%")
+                                .monospacedDigit()
+                                .frame(width: 60, alignment: .leading)
+                        }
+                    }
+                if watermarkType == .text {
+                    HStack(spacing: 12) {
+                        Toggle("阴影", isOn: $enableShadow)
+                    }
+                    if enableShadow {
+                        VStack(alignment: .leading, spacing: 8) {
+                            // 第一行：两个偏移参数
+                            HStack(spacing: 12) {
+                                Text("偏移X")
+                                Slider(value: $shadowOffsetX, in: -20...20)
+                                    .frame(width: 120)
+                                Text("偏移Y")
+                                Slider(value: $shadowOffsetY, in: -20...20)
+                                    .frame(width: 120)
+                            }
+                            // 第二行：剩余三个参数
+                            HStack(spacing: 12) {
+                                Text("半径")
+                                Slider(value: $shadowBlurRadius, in: 0...20)
+                                Text("颜色")
+                                ColorPicker("", selection: Binding(
+                                    get: { Color(shadowColor) },
+                                    set: { newColor in shadowColor = NSColor(newColor) }
+                                ))
+                                .labelsHidden()
+                                Text("透明度")
+                                Slider(value: $shadowOpacity, in: 0...100)
+                                Text("\(Int(shadowOpacity))%")
+                                    .monospacedDigit()
+                                    .frame(width: 50, alignment: .leading)
+                            }
+                        }
+                    }
+                        HStack(spacing: 12) {
+                            Toggle("描边", isOn: $enableStroke)
+                            if enableStroke {
+                                Text("描边宽度")
+                                Slider(value: $strokeWidth, in: 0...10)
+                                Text("\(Int(strokeWidth))")
+                                    .monospacedDigit()
+                                    .frame(width: 40, alignment: .leading)
+                                Text("描边颜色")
+                                ColorPicker("", selection: Binding(
+                                    get: { Color(strokeColor) },
+                                    set: { newColor in strokeColor = NSColor(newColor) }
+                                ))
+                                .labelsHidden()
+                            }
+                        }
+                }
                 }
 
                 Picker("位置", selection: $position) {
@@ -219,12 +388,12 @@ struct ContentView: View {
                 Text("提示：先‘打开图片’，输入水印后‘预览水印’，确认后‘保存图片’。")
                     .foregroundStyle(.secondary)
             }
-            .frame(minWidth: 320)
+            .frame(minWidth: 380)
             .padding(12)
         }
         .padding(16)
         .background(Color(NSColor.windowBackgroundColor))
-        .frame(minWidth: 900, minHeight: 600)
+        .frame(minWidth: 1100, minHeight: 700)
         .onAppear {
             print("[ContentView] appeared: sourceImage=\(sourceImage != nil), previewImage=\(previewImage != nil)")
         }
@@ -304,9 +473,47 @@ struct ContentView: View {
 
     private func previewWatermark() {
         guard let image = sourceImage else { return }
-        let spec = WatermarkSpec(text: watermarkText, fontSize: CGFloat(fontSize), margin: 24, position: position)
+        let spec = WatermarkSpec(
+            text: (watermarkType == .text ? watermarkText : ""),
+            fontSize: CGFloat(fontSize),
+            margin: 24,
+            position: position,
+            fontFamily: (watermarkType == .text ? (fontFamily.isEmpty ? nil : fontFamily) : nil),
+            isBold: (watermarkType == .text ? isBold : false),
+            isItalic: (watermarkType == .text ? isItalic : false),
+            color: (watermarkType == .text ? fontColor : .clear),
+            opacity: CGFloat(watermarkType == .text ? (opacity / 100.0) : 0),
+            enableShadow: (watermarkType == .text ? enableShadow : false),
+            shadowBlurRadius: CGFloat(watermarkType == .text ? shadowBlurRadius : 0),
+            shadowOffsetX: CGFloat(watermarkType == .text ? shadowOffsetX : 0),
+            shadowOffsetY: CGFloat(watermarkType == .text ? shadowOffsetY : 0),
+            shadowColor: (watermarkType == .text ? shadowColor : .clear),
+            shadowOpacity: CGFloat(watermarkType == .text ? (shadowOpacity / 100.0) : 0),
+            enableStroke: (watermarkType == .text ? enableStroke : false),
+            strokeWidth: CGFloat(watermarkType == .text ? strokeWidth : 0),
+            strokeColor: (watermarkType == .text ? strokeColor : .clear),
+            imageWatermark: (watermarkType == .image ? imageWatermark : nil),
+            imageOpacity: CGFloat(watermarkType == .image ? (imageOpacity / 100.0) : 0),
+            imageScaleMode: (watermarkType == .image ? (imageScaleModeUI == .percent ? .percent : .free) : .percent),
+            imageScalePercent: CGFloat(watermarkType == .image ? imageScalePercent : 0),
+            imageTargetWidth: CGFloat(watermarkType == .image ? imageTargetWidth : 0),
+            imageTargetHeight: CGFloat(watermarkType == .image ? imageTargetHeight : 0)
+        )
         let result = WatermarkRenderer.render(image: image, spec: spec)
         self.previewImage = result
+    }
+
+    private func chooseWatermarkImage() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [UTType.png, UTType.jpeg, UTType.tiff]
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        if panel.runModal() == .OK, let url = panel.url {
+            if let img = NSImage(contentsOf: url) {
+                self.imageWatermark = img
+            }
+        }
     }
 
     private func saveImage() {
@@ -365,13 +572,44 @@ struct ContentView: View {
             targetSize = CGSize(width: max(originalSize.width * p, 1), height: max(originalSize.height * p, 1))
         }
 
-        // 执行缩放（如需）
-        let imageToSave: NSImage
+        // 执行缩放（如需），随后基于当前设置重新渲染水印，确保导出一致
+        let baseForRender: NSImage
         if targetSize != originalSize, let resized = baseImage.resized(to: targetSize) {
-            imageToSave = resized
+            baseForRender = resized
         } else {
-            imageToSave = baseImage
+            baseForRender = baseImage
         }
+
+        // 基于当前 UI 状态构建导出使用的 WatermarkSpec（与预览相同，互斥）
+        let exportSpec = WatermarkSpec(
+            text: (watermarkType == .text ? watermarkText : ""),
+            fontSize: CGFloat(fontSize),
+            margin: 24,
+            position: position,
+            fontFamily: (watermarkType == .text ? (fontFamily.isEmpty ? nil : fontFamily) : nil),
+            isBold: (watermarkType == .text ? isBold : false),
+            isItalic: (watermarkType == .text ? isItalic : false),
+            color: (watermarkType == .text ? fontColor : .clear),
+            opacity: CGFloat(watermarkType == .text ? (opacity / 100.0) : 0),
+            enableShadow: (watermarkType == .text ? enableShadow : false),
+            shadowBlurRadius: CGFloat(watermarkType == .text ? shadowBlurRadius : 0),
+            shadowOffsetX: CGFloat(watermarkType == .text ? shadowOffsetX : 0),
+            shadowOffsetY: CGFloat(watermarkType == .text ? shadowOffsetY : 0),
+            shadowColor: (watermarkType == .text ? shadowColor : .clear),
+            shadowOpacity: CGFloat(watermarkType == .text ? (shadowOpacity / 100.0) : 0),
+            enableStroke: (watermarkType == .text ? enableStroke : false),
+            strokeWidth: CGFloat(watermarkType == .text ? strokeWidth : 0),
+            strokeColor: (watermarkType == .text ? strokeColor : .clear),
+            imageWatermark: (watermarkType == .image ? imageWatermark : nil),
+            imageOpacity: CGFloat(watermarkType == .image ? (imageOpacity / 100.0) : 0),
+            imageScaleMode: (watermarkType == .image ? (imageScaleModeUI == .percent ? .percent : .free) : .percent),
+            imageScalePercent: CGFloat(watermarkType == .image ? imageScalePercent : 0),
+            imageTargetWidth: CGFloat(watermarkType == .image ? imageTargetWidth : 0),
+            imageTargetHeight: CGFloat(watermarkType == .image ? imageTargetHeight : 0)
+        )
+
+        // 在导出尺寸上叠加水印
+        let imageToSave = WatermarkRenderer.render(image: baseForRender, spec: exportSpec)
 
         // 写入文件
         do {
