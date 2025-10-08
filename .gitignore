@@ -1,0 +1,22 @@
+# SwiftPM & build artifacts
+.build/
+DerivedData/
+.swiftpm/
+
+# macOS bundle outputs
+PhotoWatermark.app/
+
+# Xcode user data (if present)
+*.xcuserstate
+*.xcworkspace/
+*.xcodeproj/
+
+# Logs and temp
+*.log
+.DS_Store
+
+# Artifacts & caches
+artifacts/
+
+# Misc
+*.swp
