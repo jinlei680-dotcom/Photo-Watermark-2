@@ -25,11 +25,17 @@ struct ContentView: View {
     @State private var strokeWidth: Double = 2
     @State private var strokeColor: NSColor = .black
     @State private var position: WatermarkPosition = .bottomRight
+    // 边距（用于文本/图片水印的统一布局）
+    @State private var margin: Double = 24
     // 手动拖拽定位与旋转
     @State private var useManualPosition: Bool = false
     @State private var manualX: Double = 0
     @State private var manualY: Double = 0
     @State private var rotationDegrees: Double = 0
+    // 模板管理状态
+    @State private var availableTemplates: [String] = []
+    @State private var selectedTemplateName: String = ""
+    @State private var newTemplateName: String = ""
     @State private var isDropTargetActive: Bool = false
     @State private var importedItems: [ImportedItem] = []
     @State private var selectedIndex: Int? = nil
@@ -50,6 +56,8 @@ struct ContentView: View {
     // 图片水印相关
     @State private var enableImageWatermark: Bool = false
     @State private var imageWatermark: NSImage? = nil
+    // 图片水印文件路径（用于模板持久化）
+    @State private var imageWatermarkURL: URL? = nil
     enum ImageScaleModeUI: Hashable { case percent, free }
     @State private var imageScaleModeUI: ImageScaleModeUI = .percent
     @State private var imageScalePercent: Double = 50
@@ -160,7 +168,8 @@ struct ContentView: View {
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 12) {
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 12) {
                 Text("操作")
                     .font(.headline)
 
@@ -458,6 +467,56 @@ struct ContentView: View {
 
                 Text("提示：打开图片后，所有水印调整都会实时显示在左侧预览；确认后点击‘保存图片’。")
                     .foregroundStyle(.secondary)
+                Divider()
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("模板")
+                        .font(.headline)
+                    HStack(spacing: 8) {
+                        TextField("新模板名称", text: $newTemplateName)
+                            .textFieldStyle(.roundedBorder)
+                        Button("保存为模板") {
+                            let name = newTemplateName.trimmingCharacters(in: .whitespacesAndNewlines)
+                            guard !name.isEmpty else { return }
+                            let dto = makeDTOFromUI()
+                            do {
+                                try TemplateManager.saveTemplate(name: name, settings: dto)
+                                availableTemplates = TemplateManager.listTemplates()
+                                selectedTemplateName = name
+                                newTemplateName = ""
+                            } catch {
+                                print("[Template] save error: \(error)")
+                            }
+                        }
+                    }
+
+                    HStack(spacing: 8) {
+                        Picker("已保存模板", selection: $selectedTemplateName) {
+                            Text("未选择").tag("")
+                            ForEach(availableTemplates, id: \.self) { t in
+                                Text(t).tag(t)
+                            }
+                        }
+                        .frame(width: 200)
+                        Button("加载") {
+                            guard !selectedTemplateName.isEmpty, let dto = TemplateManager.loadTemplate(name: selectedTemplateName) else { return }
+                            applyDTOToUI(dto)
+                        }
+                        Button("删除") {
+                            guard !selectedTemplateName.isEmpty else { return }
+                            do {
+                                try TemplateManager.deleteTemplate(name: selectedTemplateName)
+                                availableTemplates = TemplateManager.listTemplates()
+                                selectedTemplateName = ""
+                            } catch {
+                                print("[Template] delete error: \(error)")
+                            }
+                        }
+                        Button("设为默认") {
+                            TemplateManager.setDefaultTemplate(name: selectedTemplateName.isEmpty ? nil : selectedTemplateName)
+                        }
+                    }
+                }
+                }
             }
             .frame(minWidth: 380)
             .padding(12)
@@ -467,6 +526,21 @@ struct ContentView: View {
         .frame(minWidth: 1100, minHeight: 700)
         .onAppear {
             print("[ContentView] appeared: sourceImage=\(sourceImage != nil), previewImage=\(previewImage != nil)")
+            // 启动时：加载模板列表，并尝试恢复上次会话或默认模板
+            availableTemplates = TemplateManager.listTemplates()
+            if let dto = TemplateManager.loadLastOrDefault() {
+                // 找到上次会话或默认模板，应用到 UI（包含水印文字）
+                applyDTOToUI(dto)
+            } else if let first = availableTemplates.first, let dto = TemplateManager.loadTemplate(name: first) {
+                // 回退：没有上次会话与默认模板时，加载第一个模板
+                selectedTemplateName = first
+                applyDTOToUI(dto)
+            }
+        }
+        .onDisappear {
+            // 退出时保存当前会话
+            let dto = makeDTOFromUI()
+            TemplateManager.saveLastSession(settings: dto)
         }
         .onChange(of: watermarkType) { _ in updatePreviewIfPossible() }
     }
@@ -548,7 +622,7 @@ struct ContentView: View {
         let spec = WatermarkSpec(
             text: (watermarkType == .text ? watermarkText : ""),
             fontSize: CGFloat(fontSize),
-            margin: 24,
+            margin: CGFloat(margin),
             position: position,
             useManualPosition: useManualPosition,
             manualX: CGFloat(manualX),
@@ -601,6 +675,7 @@ struct ContentView: View {
         if panel.runModal() == .OK, let url = panel.url {
             if let img = NSImage(contentsOf: url) {
                 self.imageWatermark = img
+                self.imageWatermarkURL = url
                 self.updatePreviewIfPossible()
             }
         }
@@ -674,7 +749,7 @@ struct ContentView: View {
         let exportSpec = WatermarkSpec(
             text: (watermarkType == .text ? watermarkText : ""),
             fontSize: CGFloat(fontSize),
-            margin: 24,
+            margin: CGFloat(margin),
             position: position,
             useManualPosition: useManualPosition,
             manualX: CGFloat(manualX),
@@ -738,6 +813,131 @@ struct ContentView: View {
         self.selectedIndex = nil
     }
 
+    // 从当前 UI 状态构建持久化 DTO
+    private func makeDTOFromUI() -> WatermarkSettingsDTO {
+        let wmType = (watermarkType == .text) ? "text" : "image"
+        let imgScaleModeStr = (imageScaleModeUI == .percent) ? "percent" : "free"
+        let outFormatStr = (outputFormat == .png) ? "png" : "jpeg"
+        let namingStr: String = {
+            switch namingRule {
+            case .original: return "original"
+            case .prefix: return "prefix"
+            case .suffix: return "suffix"
+            }
+        }()
+        let resizeStr: String = {
+            switch resizeMode {
+            case .none: return "none"
+            case .width: return "width"
+            case .height: return "height"
+            case .percent: return "percent"
+            }
+        }()
+        return WatermarkSettingsDTO(
+            watermarkType: wmType,
+            watermarkText: watermarkText,
+            fontSize: fontSize,
+            fontFamily: fontFamily,
+            isBold: isBold,
+            isItalic: isItalic,
+            fontColor: TemplateManager.encodeColor(fontColor),
+            opacity: opacity,
+            position: TemplateManager.encodePosition(position),
+            useManualPosition: useManualPosition,
+            manualX: manualX,
+            manualY: manualY,
+            rotationDegrees: rotationDegrees,
+            enableShadow: enableShadow,
+            shadowBlurRadius: shadowBlurRadius,
+            shadowOffsetX: shadowOffsetX,
+            shadowOffsetY: shadowOffsetY,
+            shadowColor: TemplateManager.encodeColor(shadowColor),
+            shadowOpacity: shadowOpacity,
+            enableStroke: enableStroke,
+            strokeWidth: strokeWidth,
+            strokeColor: TemplateManager.encodeColor(strokeColor),
+            imageWatermarkPath: imageWatermarkURL?.path,
+            imageOpacity: imageOpacity,
+            imageScaleMode: imgScaleModeStr,
+            imageScalePercent: imageScalePercent,
+            imageTargetWidth: imageTargetWidth,
+            imageTargetHeight: imageTargetHeight,
+            margin: margin,
+            outputFormat: outFormatStr,
+            namingRule: namingStr,
+            namePrefix: namePrefix,
+            nameSuffix: nameSuffix,
+            jpegQuality: jpegQuality,
+            resizeMode: resizeStr,
+            resizeValue: resizeValue,
+            exportDirectoryPath: exportDirectory?.path
+        )
+    }
+
+    // 应用持久化 DTO 到 UI，并触发预览
+    private func applyDTOToUI(_ dto: WatermarkSettingsDTO) {
+        watermarkType = (dto.watermarkType == "text") ? .text : .image
+        watermarkText = dto.watermarkText
+        fontSize = dto.fontSize
+        fontFamily = dto.fontFamily
+        isBold = dto.isBold
+        isItalic = dto.isItalic
+        fontColor = TemplateManager.decodeColor(dto.fontColor)
+        opacity = dto.opacity
+        position = TemplateManager.decodePosition(dto.position)
+        useManualPosition = dto.useManualPosition
+        manualX = dto.manualX
+        manualY = dto.manualY
+        rotationDegrees = dto.rotationDegrees
+        enableShadow = dto.enableShadow
+        shadowBlurRadius = dto.shadowBlurRadius
+        shadowOffsetX = dto.shadowOffsetX
+        shadowOffsetY = dto.shadowOffsetY
+        shadowColor = TemplateManager.decodeColor(dto.shadowColor)
+        shadowOpacity = dto.shadowOpacity
+        enableStroke = dto.enableStroke
+        strokeWidth = dto.strokeWidth
+        strokeColor = TemplateManager.decodeColor(dto.strokeColor)
+        imageOpacity = dto.imageOpacity
+        imageScaleModeUI = (dto.imageScaleMode == "percent") ? .percent : .free
+        imageScalePercent = dto.imageScalePercent
+        imageTargetWidth = dto.imageTargetWidth
+        imageTargetHeight = dto.imageTargetHeight
+        // 额外恢复：边距与导出相关设置（带默认）
+        if let m = dto.margin { margin = m }
+        if let fmt = dto.outputFormat { outputFormat = (fmt == "png") ? .png : .jpeg }
+        if let nr = dto.namingRule {
+            switch nr {
+            case "original": namingRule = .original
+            case "prefix": namingRule = .prefix
+            case "suffix": namingRule = .suffix
+            default: break
+            }
+        }
+        if let p = dto.namePrefix { namePrefix = p }
+        if let s = dto.nameSuffix { nameSuffix = s }
+        if let q = dto.jpegQuality { jpegQuality = q }
+        if let rm = dto.resizeMode {
+            switch rm {
+            case "none": resizeMode = .none
+            case "width": resizeMode = .width
+            case "height": resizeMode = .height
+            case "percent": resizeMode = .percent
+            default: break
+            }
+        }
+        if let rv = dto.resizeValue { resizeValue = rv }
+        if let path = dto.exportDirectoryPath, !path.isEmpty { exportDirectory = URL(fileURLWithPath: path) }
+        if let path = dto.imageWatermarkPath, !path.isEmpty {
+            let url = URL(fileURLWithPath: path)
+            if let img = NSImage(contentsOf: url) {
+                imageWatermarkURL = url
+                imageWatermark = img
+            }
+        }
+        updatePreviewIfPossible()
+    }
+
     private func chooseOutputFolder() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
@@ -774,9 +974,6 @@ struct ContentView: View {
                 let item = ImportedItem(url: url, image: image, name: nil)
                 appendImported(item)
                 lastSelectedIndex = importedItems.count - 1
-                // 设置默认水印文本（EXIF 日期或回退）
-                let exif = ExifReader.read(from: url)
-                if let date = exif.dateText, !date.isEmpty { self.watermarkText = date } else { self.watermarkText = "© Watermark" }
                 print("[Import] added: \(url.path)")
             } catch {
                 NSAlert(error: error).runModal()
@@ -820,11 +1017,6 @@ struct ContentView: View {
         self.sourceURL = item.url
         self.sourceImage = item.image
         self.previewImage = nil
-        // 如果有 URL，尝试同步 EXIF 日期为默认水印
-        if let url = item.url {
-            let exif = ExifReader.read(from: url)
-            if let date = exif.dateText, !date.isEmpty { self.watermarkText = date }
-        }
         self.updatePreviewIfPossible()
     }
 }

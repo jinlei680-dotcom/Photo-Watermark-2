@@ -9,4 +9,3 @@ enum ImageLoader {
         return image
     }
 }
-
