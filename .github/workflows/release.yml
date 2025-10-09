@@ -26,6 +26,44 @@ jobs:
         run: |
           swift build -c release
 
+      - name: Build minimal .app bundle
+        run: |
+          set -e
+          APP_NAME="PhotoWatermark"
+          APP_DIR="dist/${APP_NAME}.app"
+          mkdir -p "${APP_DIR}/Contents/MacOS"
+          mkdir -p "${APP_DIR}/Contents/Resources"
+          # Basic Info.plist
+          cat > "${APP_DIR}/Contents/Info.plist" << 'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleName</key><string>PhotoWatermark</string>
+            <key>CFBundleIdentifier</key><string>com.jinlei.photo-watermark</string>
+            <key>CFBundleVersion</key><string>${{ github.ref_name }}</string>
+            <key>CFBundleShortVersionString</key><string>${{ github.ref_name }}</string>
+            <key>CFBundleExecutable</key><string>PhotoWatermark</string>
+            <key>LSMinimumSystemVersion</key><string>10.15</string>
+            <key>NSHighResolutionCapable</key><true/>
+          </dict>
+          </plist>
+          PLIST
+          # Copy built binary if exists
+          if [ -f ".build/release/PhotoWatermark" ]; then
+            cp .build/release/PhotoWatermark "${APP_DIR}/Contents/MacOS/PhotoWatermark"
+          else
+            echo "Built binary not found; failing" >&2
+            exit 1
+          fi
+
+      - name: Package unsigned DMG
+        run: |
+          set -e
+          APP_NAME="PhotoWatermark"
+          DMG_NAME="${APP_NAME}-${{ github.ref_name }}-macos.dmg"
+          hdiutil create -volname "${APP_NAME}" -srcfolder "dist/${APP_NAME}.app" -ov -format UDZO "dist/${DMG_NAME}"
+
       - name: Package artifact
         run: |
           mkdir -p dist
@@ -48,25 +86,23 @@ jobs:
           body: |
             版本说明（${{ github.ref_name }}）
 
-            功能更新：
-            - 引入水印类型分段选择（文字/图片互斥），避免同时启用造成混乱。
-            - 将水印类型选择移动至操作区第二行，交互更清晰。
-            - 图片水印缩放范围调整为 0–100%，最低 0.01%。
-            - 阴影与描边仅在“文字水印”类型下显示，并将阴影参数拆分为两行（偏移X/Y；半径/颜色/透明度）。
+            分发方式：
+            - 本版以“未签名 DMG”分发，下载后双击挂载即可使用，无需解压。
 
-            渲染与保存：
-            - 根据水印类型互斥构造 WatermarkSpec，确保文字与图片属性不会同时生效。
-            - 去除 enableImageWatermark 分支，统一以 watermarkType 控制。
-            - 完善百分比缩放计算与边界处理（最小 0.01%）。
+            首次运行指南（无代码签名/公证）：
+            - 右键点击 `PhotoWatermark.app` → 选择“打开” → 在弹窗中再次“打开”。
+            - 或 系统设置 → 隐私与安全性 → 允许打开来自未识别开发者的应用。
+            - 高级：在终端执行 `xattr -dr com.apple.quarantine /Applications/PhotoWatermark.app` 去除隔离标记。
 
-            Bug 修复：
-            - 修复“水印类型”选择器曾被放在 ContentView 结构外导致构建失败的问题。
-            - 修正预览按钮可用状态，避免图片水印未选择图片时误可用。
+            功能更新（模板与持久化）：
+            - 新增“水印模板功能”，启动自动恢复上一会话设置（隐式模板）。
+            - 扩展 WatermarkSettingsDTO 覆盖完整参数：边距、导出格式、命名规则、前后缀、JPEG质量、尺寸模式与数值、导出目录路径。
+            - ContentView 增加 `@State margin` 并统一用于预览与导出；完善 makeDTOFromUI / applyDTOToUI 的双向映射。
 
             构建与验证：
-            - 已通过调试与发布模式的构建验证。
-          files: |
-            PhotoWatermark-${{ github.ref_name }}-macos.zip
-            dist/PhotoWatermark-${{ github.ref_name }}-macos.zip
+            - 已通过 `swift build -c release` 构建，并产出未签名 DMG。
+            - 在本地验证预览与导出一致性，模板设置可跨会话恢复。
+        files: |
+            dist/PhotoWatermark-${{ github.ref_name }}-macos.dmg
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
