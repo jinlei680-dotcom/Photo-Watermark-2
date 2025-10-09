@@ -57,12 +57,22 @@ jobs:
             exit 1
           fi
 
+      - name: Add First-Run.command into dist
+        run: |
+          set -e
+          cp First-Run.command dist/
+          chmod +x dist/First-Run.command
+
       - name: Package unsigned DMG
         run: |
           set -e
           APP_NAME="PhotoWatermark"
           DMG_NAME="${APP_NAME}-${{ github.ref_name }}-macos.dmg"
-          hdiutil create -volname "${APP_NAME}" -srcfolder "dist/${APP_NAME}.app" -ov -format UDZO "dist/${DMG_NAME}"
+          TMP_DIR="dist/dmgroot"
+          mkdir -p "$TMP_DIR"
+          cp -R "dist/${APP_NAME}.app" "$TMP_DIR/${APP_NAME}.app"
+          cp "dist/First-Run.command" "$TMP_DIR/First-Run.command"
+          hdiutil create -volname "${APP_NAME}" -srcfolder "$TMP_DIR" -ov -format UDZO "dist/${DMG_NAME}"
 
       - name: Package artifact
         run: |
