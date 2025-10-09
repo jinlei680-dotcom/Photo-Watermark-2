@@ -103,7 +103,7 @@ jobs:
             构建与验证：
             - 已通过 `swift build -c release` 构建，并产出未签名 DMG。
             - 在本地验证预览与导出一致性，模板设置可跨会话恢复。
-        files: |
+          files: |
             dist/PhotoWatermark-${{ github.ref_name }}-macos.dmg
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
